@@ -1,0 +1,50 @@
+2026-07-15 12:51:08,175 INFO: Autenticando con LibreLinkUp...
+2026-07-15 12:51:08,991 INFO: Paciente seleccionado: Nuria Álvarez García
+2026-07-15 12:51:08,991 INFO: Autenticando con LibreLinkUp...
+2026-07-15 12:51:09,572 INFO: Paciente seleccionado: Nuria Álvarez García
+2026-07-15 12:51:09,733 INFO: Descargadas 47 lecturas del histórico.
+2026-07-15 12:51:09,733 INFO: Guardando 47 lecturas en la base de datos...
+2026-07-15 12:51:09,736 INFO: Autenticando con LibreLinkUp...
+2026-07-15 12:51:10,432 INFO: Paciente seleccionado: Nuria Álvarez García
+2026-07-15 12:51:10,564 INFO: Agregando última lectura a la base de datos.
+2026-07-15 12:51:10,581 INFO: Tabla 'GlucosaTabla' cargada: rango actual A1:D35
+2026-07-15 12:51:10,582 INFO: Primera sincronización: iniciando desde 2026-07-14 23:00:00
+2026-07-15 12:51:10,582 WARNING: No hay lectura disponible antes de 2026-07-15 00:00:00; se omite esa hora.
+2026-07-15 12:51:10,583 INFO: Fila añadida: 15/07/2026 00:52 = 176 mg/dL
+2026-07-15 12:51:10,583 INFO: Fila añadida: 15/07/2026 01:52 = 196 mg/dL
+2026-07-15 12:51:10,583 INFO: Fila añadida: 15/07/2026 02:52 = 144 mg/dL
+2026-07-15 12:51:10,583 INFO: Fila añadida: 15/07/2026 03:52 = 153 mg/dL
+2026-07-15 12:51:10,584 INFO: Fila añadida: 15/07/2026 04:52 = 117 mg/dL
+2026-07-15 12:51:10,584 INFO: Fila añadida: 15/07/2026 05:52 = 178 mg/dL
+2026-07-15 12:51:10,584 INFO: Fila añadida: 15/07/2026 06:52 = 157 mg/dL
+2026-07-15 12:51:10,585 INFO: Fila añadida: 15/07/2026 07:52 = 121 mg/dL
+2026-07-15 12:51:10,585 INFO: Fila añadida: 15/07/2026 08:52 = 123 mg/dL
+2026-07-15 12:51:10,585 INFO: Fila añadida: 15/07/2026 09:52 = 133 mg/dL
+2026-07-15 12:51:10,585 INFO: Fila añadida: 15/07/2026 10:52 = 155 mg/dL
+2026-07-15 12:51:10,585 INFO: Fila añadida: 15/07/2026 11:52 = 132 mg/dL
+2026-07-15 12:51:10,586 INFO: Actualizando rango de tabla de A1:D35 a A1:D47
+2026-07-15 12:51:10,608 INFO: Archivo Excel guardado en: datos\Glucosa.xlsx
+2026-07-15 12:51:10,611 INFO: last_excel_sync actualizado a 2026-07-15 12:00:00
+2026-07-15 12:51:10,612 INFO: Sincronización de Excel completada.
+2026-07-15 12:59:11,793 INFO: Autenticando con LibreLinkUp...
+2026-07-15 12:59:12,511 INFO: Paciente seleccionado: Nuria Álvarez García
+2026-07-15 12:59:12,511 INFO: Autenticando con LibreLinkUp...
+2026-07-15 12:59:13,212 INFO: Paciente seleccionado: Nuria Álvarez García
+2026-07-15 12:59:13,379 INFO: Descargadas 47 lecturas del histórico.
+2026-07-15 12:59:13,379 INFO: Guardando 47 lecturas en la base de datos...
+2026-07-15 12:59:13,383 INFO: Autenticando con LibreLinkUp...
+2026-07-15 12:59:14,067 INFO: Paciente seleccionado: Nuria Álvarez García
+2026-07-15 12:59:14,201 INFO: Agregando última lectura a la base de datos.
+2026-07-15 12:59:14,218 INFO: Tabla localizada (A1:D2)
+2026-07-15 12:59:14,218 INFO: Excel ya está sincronizado.
+2026-07-15 12:59:27,502 INFO: Autenticando con LibreLinkUp...
+2026-07-15 12:59:28,079 INFO: Paciente seleccionado: Nuria Álvarez García
+2026-07-15 12:59:28,079 INFO: Autenticando con LibreLinkUp...
+2026-07-15 12:59:28,636 INFO: Paciente seleccionado: Nuria Álvarez García
+2026-07-15 12:59:28,768 INFO: Descargadas 47 lecturas del histórico.
+2026-07-15 12:59:28,769 INFO: Guardando 47 lecturas en la base de datos...
+2026-07-15 12:59:28,769 INFO: Autenticando con LibreLinkUp...
+2026-07-15 12:59:29,480 INFO: Paciente seleccionado: Nuria Álvarez García
+2026-07-15 12:59:29,610 INFO: Agregando última lectura a la base de datos.
+2026-07-15 12:59:29,617 INFO: Tabla localizada (A1:D2)
+2026-07-15 12:59:29,618 INFO: Excel ya está sincronizado.
