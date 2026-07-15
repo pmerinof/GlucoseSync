@@ -1,19 +1,18 @@
-import sys
+from openpyxl import load_workbook
+from config import EXCEL_FILE
+import csv
 
-from database import Database
-from excel_writer import ExcelWriter
-from logger import logger
-
-def main():
-    try:
-        db = Database()
-        writer = ExcelWriter(db)
-        writer.sync()
-    except Exception as e:
-        logger.exception("Error en la sincronización del Excel:")
-        sys.exit(1)
-    finally:
-        db.close()
+def run():
+    wb = load_workbook(EXCEL_FILE)
+    ws = wb.active
+    with open('datos/glucose_history.csv', newline='') as f:
+        reader = csv.reader(f, delimiter=';')
+        next(reader)  # saltar encabezados
+        data = list(reader)
+    for row in data:
+        # Asignar fila por timestamp/hora o similar
+        pass
+    wb.save(EXCEL_FILE)
 
 if __name__ == "__main__":
-    main()
+    run()
