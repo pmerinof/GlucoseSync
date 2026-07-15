@@ -1,16 +1,13 @@
-import os
 from pathlib import Path
+import os
 from dotenv import load_dotenv
 
-# Cargar variables de entorno desde .env (local) o desde GitHub Secrets en CI.
 load_dotenv()
-
-# Credenciales de Abbott LibreLinkUp (definidas en .env o como secrets).
+# Rutas de archivos
+BASE_DIR = Path(__file__).parent
+DB_PATH = BASE_DIR / "database" / "glucosesync.db"
+CSV_PATH = BASE_DIR / "datos" / "glucose_history.csv"
+EXCEL_FILE = BASE_DIR / "datos" / "glucosa.xlsx"
+# Credenciales desde entorno
 EMAIL = os.getenv("ABBOTT_EMAIL", "")
 PASSWORD = os.getenv("ABBOTT_PASSWORD", "")
-
-# Ruta al archivo de Excel (plantilla). Puede pasarse por EXCEL_FILE en .env.
-EXCEL_FILE = Path(os.getenv("EXCEL_FILE", "datos/glucosa.xlsx"))
-
-if not EMAIL or not PASSWORD:
-    raise ValueError("Debe especificarse ABBOTT_EMAIL y ABBOTT_PASSWORD en el archivo de configuración")
