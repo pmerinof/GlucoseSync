@@ -1,217 +1,69 @@
 from __future__ import annotations
-
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from openpyxl import load_workbook
-from openpyxl.utils import range_boundaries, get_column_letter
+from openpyxl.utils import get_column_letter
 
 from config import EXCEL_FILE
 from database import Database
 from logger import logger
 
-
 class ExcelWriter:
     """
-    Escribe las lecturas en la tabla 'GlucosaTabla' de Excel.
-
-    Para cada hora pendiente escribe el último valor disponible
-    ANTES o EN esa hora.
+    Maneja la actualización del archivo Excel con lecturas horarias.
     """
-
     def __init__(self, db: Database):
-
         self.db = db
+        if not Path(EXCEL_FILE).is_file():
+            raise FileNotFoundError(f"No se encontró el archivo Excel: {EXCEL_FILE}")
+        self.wb = load_workbook(EXCEL_FILE)
+        self.sheet = self.wb.active
 
-        try:
-            self.wb = load_workbook(EXCEL_FILE)
+        # Columna de hora (en el Excel actual se asume que la hora está en la primera columna).
+        # Ajustar si es necesario:
+        self.time_col = 1
 
-        except FileNotFoundError:
-
-            raise FileNotFoundError(
-                f"No se encontró el archivo Excel: {EXCEL_FILE}"
-            )
-
-        self.sheet = None
-        self.table = None
-
-        for ws in self.wb.worksheets:
-
-            if "GlucosaTabla" in ws.tables:
-
-                self.sheet = ws
-                self.table = ws.tables["GlucosaTabla"]
-                break
-
-        if self.table is None:
-
-            raise RuntimeError(
-                "No se encontró la tabla 'GlucosaTabla'."
-            )
-
-        (
-            self.min_col,
-            self.min_row,
-            self.max_col,
-            self.max_row,
-        ) = range_boundaries(self.table.ref)
-
-        logger.info(
-            "Tabla localizada (%s)",
-            self.table.ref
-        )
-
-    ##################################################################
-
-    def sync(self):
-
+    def sync(self) -> None:
+        """
+        Sincroniza el Excel agregando filas faltantes por hora.
+        Usa last_excel_sync para continuar donde quedó la última vez.
+        """
         last_sync = self.db.last_excel_sync()
-
-        if last_sync is None:
-
-            all_readings = self.db.get_all()
-
-            if not all_readings:
-
-                logger.info(
-                    "No existen lecturas en la base de datos."
-                )
-                return
-
-            last_sync = (
-                all_readings[0]
-                .timestamp
-                .replace(
-                    minute=0,
-                    second=0,
-                    microsecond=0,
-                )
-                - timedelta(hours=1)
-            )
-
-            logger.info(
-                "Primera sincronización."
-            )
-
-        current_hour = (
-            datetime.now()
-            .replace(
-                minute=0,
-                second=0,
-                microsecond=0,
-            )
-        )
-
-        if current_hour <= last_sync:
-
-            logger.info(
-                "Excel ya está sincronizado."
-            )
+        all_readings = self.db.get_all()
+        if not all_readings:
+            logger.info("No hay lecturas en la base de datos para sincronizar.")
             return
 
-        hours = []
+        # Determinar hora de inicio
+        if last_sync:
+            start_time = last_sync + timedelta(hours=1)
+        else:
+            # Usar la primera lectura disponible como inicio
+            start_time = all_readings[0].timestamp.replace(minute=0, second=0, microsecond=0)
+        now = datetime.now()
+        # Rellenar hasta la hora actual (no completa)
+        while start_time <= now:
+            # Obtener la lectura más reciente antes o en esta hora
+            lectura = self.db.get_last_before(start_time + timedelta(hours=1))
+            if lectura:
+                # Escribir en Excel: buscar fila correspondiente a start_time
+                found = False
+                for row in range(2, self.sheet.max_row + 1):
+                    cell = self.sheet.cell(row=row, column=self.time_col).value
+                    if isinstance(cell, datetime) and cell == start_time:
+                        # Asumimos que la glucosa va en columna 2 (B)
+                        self.sheet.cell(row=row, column=2, value=lectura.glucose)
+                        found = True
+                        break
+                if not found:
+                    # Si la hora no existe en Excel, crear nueva fila al final
+                    new_row = self.sheet.max_row + 1
+                    self.sheet.cell(row=new_row, column=self.time_col, value=start_time)
+                    self.sheet.cell(row=new_row, column=2, value=lectura.glucose)
+            start_time += timedelta(hours=1)
 
-        next_hour = last_sync + timedelta(hours=1)
-
-        while next_hour <= current_hour:
-
-            hours.append(next_hour)
-
-            next_hour += timedelta(hours=1)
-
-        filas_añadidas = 0
-
-        for hour in hours:
-
-            reading = self.db.get_last_before(hour)
-
-            if reading is None:
-
-                logger.warning(
-                    "No existe lectura antes de %s",
-                    hour,
-                )
-
-                continue
-
-            # --------------------------------------------------
-            # AQUÍ ESTÁ LA CORRECCIÓN IMPORTANTE
-            # --------------------------------------------------
-
-            fecha_str = hour.strftime("%d/%m/%Y")
-            hora_str = hour.strftime("%H:%M")
-
-            glucose = reading.glucose
-
-            self.sheet.append(
-
-                [
-
-                    fecha_str,
-
-                    hora_str,
-
-                    glucose,
-
-                ]
-
-            )
-
-            filas_añadidas += 1
-
-            logger.info(
-
-                "Añadida %s %s -> %s mg/dL (lectura real %s)",
-
-                fecha_str,
-
-                hora_str,
-
-                glucose,
-
-                reading.timestamp.strftime("%H:%M:%S"),
-
-            )
-
-        if filas_añadidas == 0:
-
-            logger.info(
-                "No había filas nuevas."
-            )
-
-            return
-
-        nuevo_final = self.max_row + filas_añadidas
-
-        nuevo_rango = (
-
-            f"{get_column_letter(self.min_col)}{self.min_row}:"
-
-            f"{get_column_letter(self.max_col)}{nuevo_final}"
-
-        )
-
-        self.table.ref = nuevo_rango
-
-        logger.info(
-            "Tabla ampliada a %s",
-            nuevo_rango,
-        )
-
+        # Guardar y actualizar estado
         self.wb.save(EXCEL_FILE)
-
-        logger.info(
-            "Excel guardado."
-        )
-
-        self.db.update_last_excel_sync(
-            hours[-1]
-        )
-
-        logger.info(
-            "last_excel_sync actualizado a %s",
-            hours[-1],
-        )
-
-        logger.info(
-            "Sincronización terminada."
-        )
+        self.db.update_last_excel_sync(datetime.now())
+        logger.info("Archivo Excel sincronizado correctamente.")
