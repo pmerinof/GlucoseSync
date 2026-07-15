@@ -1,0 +1,43 @@
+name: GlucoseSync Sync
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # Cada 6 horas
+  workflow_dispatch:       # Permite ejecución manual
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run GlucoseSync collector
+        run: python collector.py
+
+      - name: Run history export
+        run: python history_export.py
+
+      - name: Create or update GitHub Release
+        uses: ncipollo/release-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag: glucose-latest
+          name: 'GlucoseSync Datos'
+          body: 'Publicación automática del histórico de GlucoseSync.'
+          commit: ${{ github.sha }}
+          allowUpdates: true
+          artifacts: |
+            database/glucosesync.db
+            datos/glucose_history.csv
+          prerelease: false
