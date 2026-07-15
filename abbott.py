@@ -32,7 +32,11 @@ class AbbottClient:
             self.patient.first_name, self.patient.last_name
         )
 
-    def _execute(self, func: Callable) -> any:
+    from typing import Callable, TypeVar
+
+    T = TypeVar("T")
+
+    def _execute(self, func: Callable[[], T]) -> T:
         """
         Ejecuta una operación con reintentos automáticos en caso de error temporal.
         """
