@@ -40,8 +40,11 @@ class AbbottClient:
         """
         Ejecuta una operación con reintentos automáticos en caso de error temporal.
         """
-        self.connect()
+        if self.patient is None:
+            self.connect()
+
         ultimo_error = None
+
         for segundos in (0, 10, 30):
             if segundos:
                 logger.warning("Reintentando en %s segundos...", segundos)
