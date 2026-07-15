@@ -1,5 +1,5 @@
-__pycache__/
-*.pyc
+# Ignorar archivos sensibles y de entorno
 .env
-database/*.db
-datos/glucosa.xlsx
+__pycache__/
+database/
+datos/
