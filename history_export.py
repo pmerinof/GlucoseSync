@@ -1,45 +1,22 @@
-import sys
 import csv
-from pathlib import Path
-from datetime import datetime
+import datetime
+from config import CSV_PATH
+from database import get_connection
 
-from database import Database
-from logger import logger
-
-def main():
-    try:
-        db = Database()
-    except Exception as e:
-        logger.exception("No se pudo conectar a la base de datos")
-        sys.exit(1)
-
-    try:
-        readings = db.get_all()
-        if not readings:
-            logger.info("No hay lecturas en la base de datos para exportar.")
-            return
-
-        # Asegurar carpeta destino
-        out_folder = Path("datos")
-        out_folder.mkdir(exist_ok=True)
-        csv_path = out_folder / "glucose_history.csv"
-
-        # Escribir CSV
-        with csv_path.open("w", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerow(["Timestamp", "Fecha", "Hora", "Glucosa"])
-            for r in readings:
-                ts = r.timestamp
-                fecha = ts.strftime("%d/%m/%Y")
-                hora = ts.strftime("%H:%M")
-                writer.writerow([ts.isoformat(), fecha, hora, r.glucose])
-
-        logger.info("CSV histórico guardado en %s", csv_path)
-    except Exception as e:
-        logger.exception("Error exportando datos a CSV:")
-        sys.exit(1)
-    finally:
-        db.close()
+def run():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT timestamp, glucose FROM glucose ORDER BY timestamp")
+    rows = cur.fetchall()
+    conn.close()
+    with open(CSV_PATH, 'w', newline='') as f:
+        writer = csv.writer(f, delimiter=';')
+        writer.writerow(["Timestamp","Fecha","Hora","Glucosa"])
+        for ts_str, glucose in rows:
+            ts = datetime.datetime.fromisoformat(ts_str)
+            fecha = ts.strftime("%d/%m/%Y")
+            hora = ts.strftime("%H:%M")
+            writer.writerow([ts_str, fecha, hora, glucose])
 
 if __name__ == "__main__":
-    main()
+    run()
