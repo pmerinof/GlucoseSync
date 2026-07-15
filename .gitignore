@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Variables de entorno
+.env
+
+# Logs
+logs/
+*.log
+
+# Archivos temporales
+*.tmp
+
+# Excel temporal
+~$*.xlsx
+
+# VS Code
+.vscode/
+
+# Notepad++
+session.xml
