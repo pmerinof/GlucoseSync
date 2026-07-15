@@ -12,16 +12,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Set up Python 3.14
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
-          cache: 'pip'
+            python-version: '3.13'
+            cache: 'pip'
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Run GlucoseSync collector
+        env:
+            ABBOTT_EMAIL: ${{ secrets.ABBOTT_EMAIL }}
+            ABBOTT_PASSWORD: ${{ secrets.ABBOTT_PASSWORD }}
         run: python collector.py
 
       - name: Run history export
