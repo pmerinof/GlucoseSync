@@ -1,27 +1,5 @@
-# Python
 __pycache__/
-*.py[cod]
-*.pyo
-
-# Entornos virtuales
-.venv/
-venv/
-
-# Variables de entorno
+*.pyc
 .env
-
-# Logs
-logs/
-*.log
-
-# Archivos temporales
-*.tmp
-
-# Excel temporal
-~$*.xlsx
-
-# VS Code
-.vscode/
-
-# Notepad++
-session.xml
+database/*.db
+datos/glucosa.xlsx
