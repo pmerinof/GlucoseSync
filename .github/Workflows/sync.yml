@@ -1,49 +1,97 @@
 name: GlucoseSync Sync
+
 on:
-  schedule:           # Cada 6 horas
+  schedule:           # Ejecutar cada 6 horas
     - cron: '0 */6 * * *'
-  workflow_dispatch:  # Permite inicio manual
+  workflow_dispatch:  # Permite ejecución manual
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout main branch
+      # 1) Checkout del código en la carpeta 'app'
+      - name: Checkout main (app)
         uses: actions/checkout@v6
         with:
           ref: main
-      - name: Checkout data branch or create it
+          path: app
+          fetch-depth: 0
+
+      # 2) Checkout de la rama data en la carpeta 'data' (continúa si no existe)
+      - name: Checkout data branch
+        uses: actions/checkout@v6
+        with:
+          ref: data
+          path: data
+          fetch-depth: 0
+        continue-on-error: true
+
+      # 3) Crear directorios necesarios en ambas rutas
+      - name: Prepare directories
         run: |
-          git fetch origin data || true
-          git checkout data || git checkout --orphan data
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Copy DB from data branch if exists
+          mkdir -p app/database app/datos
+          mkdir -p data/database data/datos
+
+      # 4) Restaurar la base de datos anterior (si existe) en app/
+      - name: Restore database if exists
         run: |
-          mkdir -p database
-          cp database/glucosesync.db database/glucosesync.db || echo "No data yet"
+          if [ -f data/database/glucosesync.db ]; then
+            cp data/database/glucosesync.db app/database/glucosesync.db
+          else
+            echo "No database file in data branch yet."
+          fi
+
+      # 5) Restaurar el CSV histórico (si existe) en app/
+      - name: Restore CSV if exists
+        run: |
+          if [ -f data/datos/glucose_history.csv ]; then
+            cp data/datos/glucose_history.csv app/datos/glucose_history.csv
+          else
+            echo "No CSV file in data branch yet."
+          fi
+
+      # 6) Configurar Python
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.13'
+
+      # 7) Instalar dependencias
       - name: Install dependencies
+        working-directory: app
         run: pip install -r requirements.txt
-      - name: Run collector
+
+      # 8) Ejecutar collector.py
+      - name: Run collector.py
+        working-directory: app
         env:
           ABBOTT_EMAIL: ${{ secrets.ABBOTT_EMAIL }}
           ABBOTT_PASSWORD: ${{ secrets.ABBOTT_PASSWORD }}
         run: python collector.py
+
+      # 9) Ejecutar history_export.py para actualizar CSV
       - name: Export history to CSV
+        working-directory: app
         run: python history_export.py
-      - name: Commit and push if changes
+
+      # 10) Copiar BD y CSV actualizados a la carpeta 'data'
+      - name: Copy updated data to data branch
+        run: |
+          cp app/database/glucosesync.db data/database/glucosesync.db
+          cp app/datos/glucose_history.csv data/datos/glucose_history.csv
+
+      # 11) Commit y push en rama data (sólo si hay cambios)
+      - name: Commit and push changes
+        working-directory: data
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add database/glucosesync.db datos/glucose_history.csv
-          if ! git diff --quiet --cached; then
-            git commit -m "Actualizar datos ($(date))"
+          if ! git diff --cached --quiet; then
+            git commit -m "Actualizar datos: $(date +'%Y-%m-%d %H:%M:%S')"
             git push origin data
           else
             echo "No hay cambios en la base de datos."
           fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
