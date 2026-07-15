@@ -1,46 +1,49 @@
 name: GlucoseSync Sync
-
 on:
-  schedule:
-    - cron: '0 */6 * * *'   # Cada 6 horas
-  workflow_dispatch:       # Permite ejecución manual
-
+  schedule:           # Cada 6 horas
+    - cron: '0 */6 * * *'
+  workflow_dispatch:  # Permite inicio manual
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout main branch
         uses: actions/checkout@v6
-
+        with:
+          ref: main
+      - name: Checkout data branch or create it
+        run: |
+          git fetch origin data || true
+          git checkout data || git checkout --orphan data
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Copy DB from data branch if exists
+        run: |
+          mkdir -p database
+          cp database/glucosesync.db database/glucosesync.db || echo "No data yet"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-            python-version: '3.13'
-            cache: 'pip'
-
+          python-version: '3.13'
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Run GlucoseSync collector
+      - name: Run collector
         env:
-            ABBOTT_EMAIL: ${{ secrets.ABBOTT_EMAIL }}
-            ABBOTT_PASSWORD: ${{ secrets.ABBOTT_PASSWORD }}
+          ABBOTT_EMAIL: ${{ secrets.ABBOTT_EMAIL }}
+          ABBOTT_PASSWORD: ${{ secrets.ABBOTT_PASSWORD }}
         run: python collector.py
-
-      - name: Run history export
+      - name: Export history to CSV
         run: python history_export.py
-
-      - name: Create or update GitHub Release
-        uses: ncipollo/release-action@v1
+      - name: Commit and push if changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add database/glucosesync.db datos/glucose_history.csv
+          if ! git diff --quiet --cached; then
+            git commit -m "Actualizar datos ($(date))"
+            git push origin data
+          else
+            echo "No hay cambios en la base de datos."
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag: glucose-latest
-          name: 'GlucoseSync Datos'
-          body: 'Publicación automática del histórico de GlucoseSync.'
-          commit: ${{ github.sha }}
-          allowUpdates: true
-          artifacts: |
-            database/glucosesync.db
-            datos/glucose_history.csv
-          prerelease: false
