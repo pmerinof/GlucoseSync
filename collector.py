@@ -1,41 +1,91 @@
-import json, datetime
-from config import EMAIL, PASSWORD
-from database import get_connection, initialize_db
-# Importar el cliente de LibreLinkUp
-from libre_link_up import LibreLinkUpClient
+import sys
+import argparse
 
-def fetch_glucose_data():
-    client = LibreLinkUpClient(
-        username=EMAIL,
-        password=PASSWORD,
-        # La URL por región; usar la correcta según Abbott
-        url="https://api-eu2.libreview.io",
-        version="4.16.0"
+from abbott import AbbottClient
+from database import Database
+from logger import logger
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Descarga lecturas de LibreLinkUp y actualiza la base de datos."
     )
-    client.login()
-    # Obtener múltiples lecturas (por ejemplo, últimas 1-2 semanas)
-    data = client.get_reading_history()  # Supongamos que devuelve lista
-    return data
 
-def run():
-    # Inicializar DB y leer datos
-    initialize_db()
-    readings = fetch_glucose_data()
-    conn = get_connection()
-    cur = conn.cursor()
-    count = 0
-    for entry in readings:
-        ts = datetime.datetime.fromtimestamp(entry["unix_timestamp"])
-        ts_str = ts.isoformat(sep=' ')
-        glucose = int(round(entry["value_in_mg_per_dl"]))
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="No modifica la base de datos."
+    )
+
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Muestra información adicional."
+    )
+
+    args = parser.parse_args()
+
+    db = None
+
+    try:
+        logger.info("Iniciando sincronización...")
+
+        db = Database()
+
+        client = AbbottClient()
+
+        # Descarga el histórico (~12 horas)
+        lecturas = client.graph()
+
+        logger.info(
+            "Se han descargado %d lecturas.",
+            len(lecturas)
+        )
+
+        if args.verbose:
+            for lectura in lecturas:
+                logger.info(
+                    "%s -> %d",
+                    lectura.timestamp,
+                    lectura.glucose
+                )
+
+        if not args.dry_run:
+            db.insert_many(lecturas)
+
+        # Última lectura (por si todavía no aparece en graph)
         try:
-            cur.execute("INSERT INTO glucose(timestamp, glucose) VALUES (?, ?)", (ts_str, glucose))
-            count += 1
-        except sqlite3.IntegrityError:
-            continue  # ya existía
-    conn.commit()
-    conn.close()
-    print(f"Se agregaron {count} lecturas nuevas.")
-    
+            ultima = client.latest()
+
+            if args.verbose:
+                logger.info(
+                    "Última lectura: %s -> %d",
+                    ultima.timestamp,
+                    ultima.glucose
+                )
+
+            if not args.dry_run:
+                db.insert(ultima)
+
+        except Exception as e:
+            logger.warning(
+                "No se pudo descargar la última lectura: %s",
+                e
+            )
+
+        if args.dry_run:
+            logger.info("Ejecución de prueba finalizada.")
+        else:
+            logger.info("Base de datos actualizada correctamente.")
+
+    except Exception:
+        logger.exception("Error durante la sincronización.")
+        sys.exit(1)
+
+    finally:
+        if db is not None:
+            db.close()
+
+
 if __name__ == "__main__":
-    run()
+    main()
