@@ -15,3 +15,4 @@ def initialize_db():
     """)
     conn.commit()
     conn.close()
+def get_last_timestamp():
