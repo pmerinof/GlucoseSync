@@ -1,84 +1,173 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+from __future__ import annotations
 
-from datetime import datetime
-import logging
 import sys
+import argparse
+from datetime import datetime, timedelta
 
 from abbott import AbbottClient
-from database import (
-    get_last_timestamp,
-    initialize_db,
-    insert_many,
-    insert,
-)
+from database import Database
+from logger import logger
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s: %(message)s",
-)
+def seleccionar_lecturas_horarias(lecturas):
+    """
+    Selecciona una lectura por cada hora.
 
-logger = logging.getLogger("GlucoseSync")
+    Para cada hora del periodo disponible, selecciona la lectura real
+    cuyo timestamp esté más próximo a la hora exacta.
+
+    No se generan valores artificiales: siempre se conserva el valor
+    de una lectura real obtenida de LibreLinkUp.
+    """
+
+    if not lecturas:
+        return []
+
+    # Orden cronológico
+    lecturas = sorted(lecturas, key=lambda r: r.timestamp)
+
+    seleccionadas = []
+    horas_procesadas = set()
+
+    for lectura in lecturas:
+        timestamp = lectura.timestamp
+
+        # Redondear conceptualmente la lectura a la hora más cercana.
+        # Si está a 30 minutos exactos, se mantiene la hora inferior.
+        hora_objetivo = timestamp.replace(
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+
+        minutos_desde_hora = (
+            timestamp - hora_objetivo
+        ).total_seconds() / 60
+
+        if minutos_desde_hora >= 30:
+            hora_objetivo += timedelta(hours=1)
+
+        # Si todavía no tenemos una lectura para esa hora,
+        # la guardamos provisionalmente.
+        if hora_objetivo not in horas_procesadas:
+            seleccionadas.append(lectura)
+            horas_procesadas.add(hora_objetivo)
+
+        else:
+            # Ya tenemos una lectura asignada a esa hora.
+            # Comparamos cuál está más cerca de la hora exacta.
+            anterior = seleccionadas[-1]
+
+            distancia_anterior = abs(
+                (
+                    anterior.timestamp - hora_objetivo
+                ).total_seconds()
+            )
+
+            distancia_actual = abs(
+                (
+                    lectura.timestamp - hora_objetivo
+                ).total_seconds()
+            )
+
+            if distancia_actual < distancia_anterior:
+                seleccionadas[-1] = lectura
+
+    return sorted(
+        seleccionadas,
+        key=lambda r: r.timestamp,
+    )
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Descarga lecturas de LibreLinkUp y "
+            "guarda una lectura por cada hora."
+        )
+    )
+
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="No inserta datos en la BD.",
+    )
+
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Muestra información detallada.",
+    )
+
+    args = parser.parse_args()
+
     logger.info("Iniciando GlucoseSync...")
 
-    try:
-        initialize_db()
-    except Exception:
-        logger.exception("No se pudo inicializar la base de datos.")
-        sys.exit(1)
+    db = None
 
     try:
-        last_timestamp = get_last_timestamp()
-
-        if last_timestamp is None:
-            logger.info(
-                "No hay lecturas anteriores en la base de datos."
-            )
-        else:
-            logger.info(
-                "Última lectura almacenada: %s",
-                last_timestamp.isoformat(),
-            )
-
-    except Exception:
-        logger.exception(
-            "No se pudo obtener la última lectura almacenada."
-        )
-        sys.exit(1)
-
-    try:
+        db = Database()
         client = AbbottClient()
-    except Exception:
-        logger.exception(
-            "No se pudo inicializar el cliente de Abbott."
-        )
-        sys.exit(1)
 
-    try:
-        readings = client.graph()
+        # Obtener lecturas disponibles
+        lecturas = client.graph()
 
-        if last_timestamp is None:
-            nuevas = readings
-        else:
-            nuevas = [
-                reading
-                for reading in readings
-                if reading.timestamp > last_timestamp
-            ]
-
-        if nuevas:
+        if args.verbose:
             logger.info(
-                "Se han encontrado %d lecturas nuevas.",
-                len(nuevas),
+                "Lecturas obtenidas de LibreLinkUp: %d",
+                len(lecturas),
             )
-            insert_many(nuevas)
+
+        # Seleccionar una lectura por hora
+        lecturas_horarias = seleccionar_lecturas_horarias(
+            lecturas
+        )
+
+        logger.info(
+            "Lecturas horarias seleccionadas: %d",
+            len(lecturas_horarias),
+        )
+
+        if args.verbose:
+            for lectura in lecturas_horarias:
+                logger.info(
+                    "Seleccionada: %s → %s",
+                    lectura.timestamp,
+                    lectura.glucose,
+                )
+
+        # Guardar lecturas
+        if not args.dry_run and lecturas_horarias:
+            db.insert_many(lecturas_horarias)
+
+        # Intentar guardar también la última lectura disponible.
+        # Esto permite disponer de la lectura más reciente aunque
+        # todavía no corresponda a una hora completa.
+        try:
+            ultima = client.latest()
+
+            if ultima and not args.dry_run:
+                db.insert(ultima)
+
+                logger.info(
+                    "Última lectura guardada: %s → %s",
+                    ultima.timestamp,
+                    ultima.glucose,
+                )
+
+        except Exception as e:
+            logger.warning(
+                "No se pudo obtener la última lectura: %s",
+                e,
+            )
+
+        if args.dry_run:
+            logger.info(
+                "Dry-run: no se modificó la base de datos."
+            )
         else:
             logger.info(
-                "No se han encontrado lecturas nuevas en graph()."
+                "Base de datos actualizada correctamente."
             )
 
     except Exception:
@@ -87,37 +176,10 @@ def main():
         )
         sys.exit(1)
 
-    try:
-        latest = client.latest()
+    finally:
+        if db is not None:
+            db.close()
 
-        if last_timestamp is None or latest.timestamp > last_timestamp:
-            # Evitar volver a insertar una lectura que ya haya
-            # sido introducida mediante graph().
-            if not any(
-                reading.timestamp == latest.timestamp
-                for reading in nuevas
-            ):
-                logger.info(
-                    "Guardando la última lectura: %s",
-                    latest.timestamp.isoformat(),
-                )
-                insert(latest)
-
-    except Exception:
-        logger.exception(
-            "No se pudo obtener la última lectura."
-        )
-        sys.exit(1)
-
-    logger.info("GlucoseSync finalizado correctamente.")
-
-
-# Compatibilidad con main.py
-run = main
-
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()
