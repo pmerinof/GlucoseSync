@@ -1,10 +1,9 @@
 from __future__ import annotations
 import time
-from typing import Callable
+from typing import Callable, TypeVar
 
 from pylibrelinkup import PyLibreLinkUp
 from config import EMAIL, PASSWORD
-from database import Database
 from models import GlucoseReading
 from logger import logger
 
