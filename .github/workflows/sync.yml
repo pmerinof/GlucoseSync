@@ -8,7 +8,6 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # Definir variables de entorno para el job (incluye los secretos)
     env:
       ABBOTT_EMAIL: ${{ secrets.ABBOTT_EMAIL }}
       ABBOTT_PASSWORD: ${{ secrets.ABBOTT_PASSWORD }}
@@ -19,10 +18,10 @@ jobs:
         with:
           ref: main
           path: main-code
-          fetch-depth: 0       # Obtener todo el historial, para crear branch local
+          fetch-depth: 0
 
       - name: Configurar Python 3
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5   # Usar la versión 5 según documentación
         with:
           python-version: '3.x'
 
@@ -34,6 +33,9 @@ jobs:
       - name: Ejecutar collector
         run: python main-code/collector.py
 
+      - name: Exportar histórico a CSV
+        run: python main-code/history_export.py
+
       - name: Checkout (rama data)
         uses: actions/checkout@v7
         with:
@@ -43,6 +45,8 @@ jobs:
 
       - name: Copiar base de datos y CSV al workspace de data
         run: |
+          mkdir -p data-branch/database
+          mkdir -p data-branch/datos
           cp main-code/database/glucosesync.db data-branch/database/
           cp main-code/datos/glucose_history.csv data-branch/datos/
 
@@ -51,9 +55,6 @@ jobs:
           cd data-branch
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          # Añadir archivos modificados
           git add database/glucosesync.db datos/glucose_history.csv
-          # Si no hay cambios, git commit retornará error, por eso usamos || true
           git commit -m "Actualiza datos de glucosa [ci skip]" || echo "Sin cambios para commitear"
-          # Forzar push a la rama data
           git push origin data
