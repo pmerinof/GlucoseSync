@@ -2,59 +2,78 @@ name: Actualizar datos de glucosa
 
 on:
   schedule:
-    - cron: '0 0,6,12,18 * * *'  # Ejecuta a medianoche, 6:00, 12:00 y 18:00 UTC diariamente
-  workflow_dispatch:            # Permite ejecución manual desde GitHub
+    - cron: '0 0,6,12,18 * * *'
+  workflow_dispatch:
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+
     env:
       ABBOTT_EMAIL: ${{ secrets.ABBOTT_EMAIL }}
       ABBOTT_PASSWORD: ${{ secrets.ABBOTT_PASSWORD }}
 
     steps:
-      - name: Checkout (rama main)
+
+      - name: Checkout rama main
         uses: actions/checkout@v7
         with:
           ref: main
           path: main-code
           fetch-depth: 0
 
-      - name: Configurar Python 3
-        uses: actions/setup-python@v5   # Usar la versión 5 según documentación
-        with:
-          python-version: '3.x'
-
-      - name: Instalar dependencias
-        run: |
-          pip install --upgrade pip
-          pip install -r main-code/requirements.txt
-
-      - name: Ejecutar collector
-        run: python main-code/collector.py
-
-      - name: Exportar histórico a CSV
-        run: python main-code/history_export.py
-
-      - name: Checkout (rama data)
+      - name: Checkout rama data
         uses: actions/checkout@v7
         with:
           ref: data
           path: data-branch
           fetch-depth: 0
 
-      - name: Copiar base de datos y CSV al workspace de data
+      - name: Preparar datos existentes
         run: |
+          mkdir -p main-code/database
+          mkdir -p main-code/datos
           mkdir -p data-branch/database
           mkdir -p data-branch/datos
+
+          if [ -f data-branch/database/glucosesync.db ]; then
+            cp data-branch/database/glucosesync.db main-code/database/glucosesync.db
+          fi
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r main-code/requirements.txt
+
+      - name: Ejecutar collector
+        working-directory: main-code
+        run: python collector.py
+
+      - name: Exportar histórico a CSV
+        working-directory: main-code
+        run: python history_export.py
+
+      - name: Copiar datos actualizados a data
+        run: |
           cp main-code/database/glucosesync.db data-branch/database/
           cp main-code/datos/glucose_history.csv data-branch/datos/
 
-      - name: Commit y push de cambios en data
+      - name: Guardar cambios en rama data
+        working-directory: data-branch
         run: |
-          cd data-branch
           git config user.name "github-actions"
           git config user.email "actions@github.com"
+
           git add database/glucosesync.db datos/glucose_history.csv
-          git commit -m "Actualiza datos de glucosa [ci skip]" || echo "Sin cambios para commitear"
-          git push origin data
+
+          if git diff --cached --quiet; then
+            echo "No hay cambios que guardar."
+          else
+            git commit -m "Actualiza datos de glucosa"
+            git push origin data
+          fi
