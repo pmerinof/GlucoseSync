@@ -1,101 +1,172 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+collector.py: Extrae datos de glucosa desde Abbott LibreLinkUp,
+los filtra para conservar solo lecturas nuevas y los inserta en la base SQLite.
+"""
 
-import sys
-import argparse
+import logging
 from datetime import datetime
-import sqlite3
+import os
+import sys
 
-from abbott import AbbottClient
-from database import initialize_db, get_connection
-from logger import logger
+# Importar clases del proyecto
+from config import ABBOTT_EMAIL, ABBOTT_PASSWORD
+from abbott import Abbott
+from database import Database
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Descarga lecturas de LibreLinkUp y actualiza la base de datos."
-    )
-    parser.add_argument("--dry-run", action="store_true",
-                        help="No modifica la base de datos.")
-    parser.add_argument("--verbose", action="store_true",
-                        help="Muestra información adicional.")
-    args = parser.parse_args()
+    # Configuración básica del logger
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
-    logger.info("Iniciando sincronización...")
+    # Inicializar conexión a la base de datos
+    try:
+        db = Database()
+    except Exception as e:
+        logging.error(f"Error al conectar con la base de datos: {e}")
+        sys.exit(1)
+    db.initialize_db()  # Asegura que existe la tabla (si aplica)
+
+    # Obtener la última fecha registrada en la base de datos
+    last_ts = None
+    try:
+        # Asumimos que Database tiene un método get_last_timestamp() que devuelve un datetime o similar
+        last_ts = db.get_last_timestamp()
+    except AttributeError:
+        # Si no existe, intentamos otros métodos alternativos
+        try:
+            last_ts = db.get_last_reading_timestamp()
+        except Exception:
+            # Fallback: consulta manual SQL suponiendo tabla 'readings' con campo 'timestamp'
+            try:
+                conn = db.get_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT MAX(timestamp) FROM readings;")
+                row = cursor.fetchone()
+                if row:
+                    last_ts = row[0]
+            except Exception as e:
+                logging.warning("No fue posible determinar la última fecha desde la DB: %s", e)
+                last_ts = None
+
+    # Normalizar el tipo de last_ts a datetime si es necesario
+    if isinstance(last_ts, (int, float)):
+        last_ts = datetime.fromtimestamp(last_ts)
+    elif isinstance(last_ts, str):
+        try:
+            last_ts = datetime.fromisoformat(last_ts)
+        except ValueError:
+            logging.warning("Formato de fecha desconocido para last_ts: %s", last_ts)
+            last_ts = None
+
+    if last_ts is None:
+        # Si no hay datos previos, asignar una fecha muy antigua
+        last_ts = datetime(1970, 1, 1)
+        logging.info("No hay lecturas anteriores. Se tomarán todas las lecturas disponibles.")
+
+    # Conectar al servicio de Abbott LibreLinkUp
+    try:
+        abbott = Abbott(ABBOTT_EMAIL, ABBOTT_PASSWORD)
+    except Exception as e:
+        logging.error(f"Error al iniciar sesión en LibreLinkUp: {e}")
+        sys.exit(1)
+
+    # Obtener el historial completo de lecturas (graph) y la lectura más reciente (latest)
+    try:
+        readings = abbott.graph()
+    except Exception as e:
+        logging.error(f"Error al obtener lecturas (graph): {e}")
+        readings = []
 
     try:
-        # Inicializar BD y obtener conexión
-        initialize_db()
-        conn = get_connection()
-        cur = conn.cursor()
-
-        # Obtener la última marca temporal en la BD (como datetime)
-        cur.execute("SELECT MAX(timestamp) FROM glucose")
-        result = cur.fetchone()[0]
-        ultima_bd = None
-        if result:
-            try:
-                ultima_bd = datetime.fromisoformat(result)
-            except ValueError:
-                # Si falla el parseo, ignorar
-                ultima_bd = None
-
-        # Conectar al API de LibreLinkUp
-        client = AbbottClient()
-
-        # Descargar histórico reciente (~12 horas)
-        lecturas = client.graph()
-        logger.info("Se han descargado %d lecturas del histórico.", len(lecturas))
-
-        if args.verbose:
-            for lec in lecturas:
-                logger.info("%s -> %d", lec.timestamp.isoformat(sep=' '), lec.glucose)
-
-        # Filtrar lecturas posteriores a la última fecha registrada
-        lecturas_nuevas = []
-        for lec in lecturas:
-            lec_ts = lec.timestamp
-            if ultima_bd is None or lec_ts > ultima_bd:
-                lecturas_nuevas.append(lec)
-
-        if lecturas_nuevas:
-            logger.info("Insertando %d lecturas nuevas en la BD.", len(lecturas_nuevas))
-            if not args.dry_run:
-                sql = "INSERT OR IGNORE INTO glucose(timestamp, glucose) VALUES (?,?)"
-                for lec in lecturas_nuevas:
-                    cur.execute(sql, (lec.timestamp.isoformat(), lec.glucose))
-        else:
-            logger.info("No hay lecturas nuevas para insertar.")
-
-        # Consultar la última lectura puntual (para no perder la más reciente)
-        try:
-            ultima = client.latest()
-            if ultima:
-                if args.verbose:
-                    logger.info("Última lectura: %s -> %d",
-                                ultima.timestamp.isoformat(sep=' '), ultima.glucose)
-                # Insertar la última lectura si es posterior
-                if (ultima_bd is None or ultima.timestamp > ultima_bd) and not args.dry_run:
-                    cur.execute("INSERT OR IGNORE INTO glucose(timestamp, glucose) VALUES (?,?)",
-                                (ultima.timestamp.isoformat(), ultima.glucose))
-        except Exception as e:
-            logger.warning("No se pudo descargar la última lectura: %s", e)
-
-        # Cerrar la BD (commit automático en caso de modificación)
-        if not args.dry_run:
-            conn.commit()
-            logger.info("Base de datos actualizada correctamente.")
-        else:
-            logger.info("Ejecución de prueba (dry-run) finalizada: no se modificó la base de datos.")
-
+        latest_reading = abbott.latest()
     except Exception as e:
-        logger.exception("Error durante la sincronización.")
-        sys.exit(1)
-    finally:
-        # Asegurar cierre de conexión
+        logging.error(f"Error al obtener la última lectura (latest): {e}")
+        latest_reading = None
+
+    # Filtrar solo las lecturas posteriores a la última fecha en la base de datos
+    nuevas = []
+    for r in readings:
+        # Extraer timestamp de la lectura (depende del objeto retornado)
+        ts = None
+        if hasattr(r, 'timestamp'):
+            ts = r.timestamp
+        elif hasattr(r, 'unix_timestamp'):
+            ts = r.unix_timestamp
+        elif isinstance(r, dict):
+            ts = r.get('timestamp') or r.get('unix_timestamp')
+        
+        # Convertir ts a datetime
+        ts_dt = None
+        if isinstance(ts, (int, float)):
+            ts_dt = datetime.fromtimestamp(ts)
+        elif isinstance(ts, str):
+            try:
+                ts_dt = datetime.fromisoformat(ts)
+            except Exception:
+                logging.debug("No se pudo parsear la fecha: %s", ts)
+        elif isinstance(ts, datetime):
+            ts_dt = ts
+
+        # Si la lectura es más reciente, incluirla
+        if ts_dt and ts_dt > last_ts:
+            nuevas.append(r)
+
+    # Insertar nuevas lecturas en la base de datos
+    if nuevas:
+        logging.info(f"Insertando {len(nuevas)} lecturas nuevas.")
         try:
-            conn.close()
-        except:
-            pass
+            db.insert_many(nuevas)  # Asumimos que Database soporta insert_many(objetos)
+        except AttributeError:
+            # Si no existe insert_many, insertar individualmente
+            for r in nuevas:
+                try:
+                    db.insert(r)
+                except Exception as e:
+                    logging.error(f"Error insertando lectura {r}: {e}")
+    else:
+        logging.info("No hay nuevas lecturas del historial (graph).")
+
+    # Procesar la lectura "latest": puede ser más reciente que todas las anteriores
+    if latest_reading:
+        # Misma lógica para obtener ts de latest_reading
+        ts = None
+        if hasattr(latest_reading, 'timestamp'):
+            ts = latest_reading.timestamp
+        elif hasattr(latest_reading, 'unix_timestamp'):
+            ts = latest_reading.unix_timestamp
+        elif isinstance(latest_reading, dict):
+            ts = latest_reading.get('timestamp') or latest_reading.get('unix_timestamp')
+        
+        ts_dt = None
+        if isinstance(ts, (int, float)):
+            ts_dt = datetime.fromtimestamp(ts)
+        elif isinstance(ts, str):
+            try:
+                ts_dt = datetime.fromisoformat(ts)
+            except Exception:
+                ts_dt = None
+        elif isinstance(ts, datetime):
+            ts_dt = ts
+
+        if ts_dt and ts_dt > last_ts:
+            logging.info("Insertando lectura más reciente (latest).")
+            try:
+                db.insert(latest_reading)
+            except Exception:
+                # Fallback si solo hay insert_many
+                try:
+                    db.insert_many([latest_reading])
+                except Exception as e:
+                    logging.error(f"Error insertando la última lectura: {e}")
+        else:
+            logging.info("La lectura 'latest' no es más reciente que los datos existentes.")
+
+    # Cerrar la base de datos (si hace falta)
+    try:
+        db.close()
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     main()
