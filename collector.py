@@ -5,8 +5,8 @@ collector.py: Extrae datos de glucosa desde Abbott LibreLinkUp,
 los filtra para conservar solo lecturas nuevas y los inserta en la base SQLite.
 """
 
-import logging
-from datetime import datetime
+import os
+from abbott import AbbottClient
 import os
 import sys
 
@@ -66,7 +66,9 @@ def main():
 
     # Conectar al servicio de Abbott LibreLinkUp
     try:
-        abbott = Abbott(ABBOTT_EMAIL, ABBOTT_PASSWORD)
+        email = os.getenv("ABBOTT_EMAIL")
+        password = os.getenv("ABBOTT_PASSWORD")
+        client = AbbottClient(email, password)
     except Exception as e:
         logging.error(f"Error al iniciar sesión en LibreLinkUp: {e}")
         sys.exit(1)
