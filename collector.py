@@ -2,80 +2,86 @@ from __future__ import annotations
 
 import sys
 import argparse
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from abbott import AbbottClient
-from database import Database
+import database
 from logger import logger
 
 
 def seleccionar_lecturas_horarias(lecturas):
     """
-    Selecciona una lectura por cada hora.
+    Selecciona una única lectura para cada hora.
 
-    Para cada hora del periodo disponible, selecciona la lectura real
-    cuyo timestamp esté más próximo a la hora exacta.
+    Para cada hora representada en las lecturas obtenidas,
+    se selecciona la lectura real cuyo timestamp está más
+    próximo a la hora exacta.
 
-    No se generan valores artificiales: siempre se conserva el valor
-    de una lectura real obtenida de LibreLinkUp.
+    No se generan valores artificiales: siempre se utiliza
+    una lectura real procedente de LibreLinkUp.
     """
 
     if not lecturas:
         return []
 
-    # Orden cronológico
-    lecturas = sorted(lecturas, key=lambda r: r.timestamp)
+    lecturas = sorted(
+        lecturas,
+        key=lambda r: r.timestamp
+    )
 
-    seleccionadas = []
-    horas_procesadas = set()
+    grupos = {}
 
     for lectura in lecturas:
         timestamp = lectura.timestamp
 
-        # Redondear conceptualmente la lectura a la hora más cercana.
-        # Si está a 30 minutos exactos, se mantiene la hora inferior.
-        hora_objetivo = timestamp.replace(
+        # Hora exacta inmediatamente anterior
+        hora_base = timestamp.replace(
             minute=0,
             second=0,
             microsecond=0,
         )
 
-        minutos_desde_hora = (
-            timestamp - hora_objetivo
-        ).total_seconds() / 60
+        # Distancia respecto a la hora en punto
+        distancia_base = abs(
+            timestamp - hora_base
+        )
 
-        if minutos_desde_hora >= 30:
-            hora_objetivo += timedelta(hours=1)
+        # Distancia respecto a la hora siguiente
+        hora_siguiente = hora_base + timedelta(hours=1)
 
-        # Si todavía no tenemos una lectura para esa hora,
-        # la guardamos provisionalmente.
-        if hora_objetivo not in horas_procesadas:
-            seleccionadas.append(lectura)
-            horas_procesadas.add(hora_objetivo)
+        distancia_siguiente = abs(
+            timestamp - hora_siguiente
+        )
 
+        # Elegimos la hora en punto más cercana
+        if distancia_siguiente < distancia_base:
+            hora_objetivo = hora_siguiente
         else:
-            # Ya tenemos una lectura asignada a esa hora.
-            # Comparamos cuál está más cerca de la hora exacta.
-            anterior = seleccionadas[-1]
+            hora_objetivo = hora_base
+
+        # Si todavía no hay lectura para esa hora,
+        # la guardamos.
+        if hora_objetivo not in grupos:
+            grupos[hora_objetivo] = lectura
+        else:
+            # Si ya existe una lectura para esa hora,
+            # conservamos la que esté más cerca.
+            anterior = grupos[hora_objetivo]
 
             distancia_anterior = abs(
-                (
-                    anterior.timestamp - hora_objetivo
-                ).total_seconds()
+                anterior.timestamp - hora_objetivo
             )
 
             distancia_actual = abs(
-                (
-                    lectura.timestamp - hora_objetivo
-                ).total_seconds()
+                lectura.timestamp - hora_objetivo
             )
 
             if distancia_actual < distancia_anterior:
-                seleccionadas[-1] = lectura
+                grupos[hora_objetivo] = lectura
 
     return sorted(
-        seleccionadas,
-        key=lambda r: r.timestamp,
+        grupos.values(),
+        key=lambda r: r.timestamp
     )
 
 
@@ -90,7 +96,7 @@ def main():
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="No inserta datos en la BD.",
+        help="No modifica la base de datos.",
     )
 
     parser.add_argument(
@@ -103,20 +109,26 @@ def main():
 
     logger.info("Iniciando GlucoseSync...")
 
-    db = None
-
     try:
-        db = Database()
+        # Inicializar la base de datos
+        database.initialize_db()
+
+        # Crear cliente de LibreLinkUp
         client = AbbottClient()
 
-        # Obtener lecturas disponibles
+        # Descargar histórico disponible
         lecturas = client.graph()
 
-        if args.verbose:
-            logger.info(
-                "Lecturas obtenidas de LibreLinkUp: %d",
-                len(lecturas),
+        logger.info(
+            "Lecturas obtenidas de LibreLinkUp: %d",
+            len(lecturas),
+        )
+
+        if not lecturas:
+            logger.warning(
+                "LibreLinkUp no ha devuelto ninguna lectura."
             )
+            return
 
         # Seleccionar una lectura por hora
         lecturas_horarias = seleccionar_lecturas_horarias(
@@ -136,38 +148,16 @@ def main():
                     lectura.glucose,
                 )
 
-        # Guardar lecturas
-        if not args.dry_run and lecturas_horarias:
-            db.insert_many(lecturas_horarias)
+        # Guardar las lecturas seleccionadas
+        if not args.dry_run:
+            database.insert_many(lecturas_horarias)
 
-        # Intentar guardar también la última lectura disponible.
-        # Esto permite disponer de la lectura más reciente aunque
-        # todavía no corresponda a una hora completa.
-        try:
-            ultima = client.latest()
-
-            if ultima and not args.dry_run:
-                db.insert(ultima)
-
-                logger.info(
-                    "Última lectura guardada: %s → %s",
-                    ultima.timestamp,
-                    ultima.glucose,
-                )
-
-        except Exception as e:
-            logger.warning(
-                "No se pudo obtener la última lectura: %s",
-                e,
-            )
-
-        if args.dry_run:
             logger.info(
-                "Dry-run: no se modificó la base de datos."
+                "Base de datos actualizada correctamente."
             )
         else:
             logger.info(
-                "Base de datos actualizada correctamente."
+                "Dry-run: no se modificó la base de datos."
             )
 
     except Exception:
@@ -175,10 +165,6 @@ def main():
             "Error al descargar o guardar el histórico."
         )
         sys.exit(1)
-
-    finally:
-        if db is not None:
-            db.close()
 
 
 if __name__ == "__main__":
